@@ -3,15 +3,15 @@
 import os
 import sys
 import getopt
-import comanage_scripts_utils as utils
+import comanage_utils as utils
 
 SCRIPT = os.path.basename(__file__)
-ENDPOINT = "https://registry-test.cilogon.org/registry/"
-LDAP_SERVER = "ldaps://ldap-test.cilogon.org"
-LDAP_USER = "uid=registry_user,ou=system,o=OSG,o=CO,dc=cilogon,dc=org"
-OSG_CO_ID = 8
-UNIX_CLUSTER_ID = 10
-LDAP_TARGET_ID = 9
+ENDPOINT = "https://registry.cilogon.org/registry/"
+LDAP_SERVER = "ldaps://ldap.cilogon.org"
+LDAP_USER = "uid=readonly_user,ou=system,o=OSG,o=CO,dc=cilogon,dc=org"
+OSG_CO_ID = 7
+UNIX_CLUSTER_ID = 1
+LDAP_TARGET_ID = 6
 
 OSPOOL_PROJECT_PREFIX_STR = "Yes-"
 PROJECT_GIDS_START = 200000
@@ -25,6 +25,8 @@ OPTIONS:
   -c OSG_CO_ID        specify OSG CO ID (default = {OSG_CO_ID})
   -g CLUSTER_ID       specify UNIX Cluster ID (default = {UNIX_CLUSTER_ID})
   -l LDAP_TARGET      specify LDAP Provsion ID (defult = {LDAP_TARGET_ID})
+  -s LDAP_SERVER      specify LDAP server
+  -y LDAP_USER        specify LDAP server user
   -p LDAP authtok     specify LDAP server authtok
   -d passfd           specify open fd to read PASS
   -f passfile         specify path to file to open and read PASS
@@ -43,7 +45,7 @@ PASS for USER is taken from the first of:
 
 def usage(msg=None):
     if msg:
-        print(msg + "\n", file=sys.stderr)
+        print(f"{msg}\n", file=sys.stderr)
 
     print(_usage, file=sys.stderr)
     sys.exit()
@@ -51,10 +53,12 @@ def usage(msg=None):
 
 class Options:
     endpoint = ENDPOINT
-    user = "co_8.william_test"
+    user = "co_7.project_script"
     osg_co_id = OSG_CO_ID
     ucid = UNIX_CLUSTER_ID
     provision_target = LDAP_TARGET_ID
+    ldap_user = LDAP_USER
+    ldap_server = LDAP_SERVER
     outfile = None
     authstr = None
     ldap_authtok = None
@@ -66,7 +70,7 @@ options = Options()
 
 def parse_options(args):
     try:
-        ops, args = getopt.getopt(args, "u:c:g:l:p:d:f:e:o:h")
+        ops, args = getopt.getopt(args, "u:c:g:l:p:d:f:e:o:s:y:h")
     except getopt.GetoptError:
         usage()
 
@@ -97,6 +101,10 @@ def parse_options(args):
             options.endpoint = arg
         if op == "-o":
             options.outfile = arg
+        if op == "-s":
+            options.ldap_server = arg
+        if op == "-y":
+            options.ldap_user = arg
 
     try:
         user, passwd = utils.getpw(options.user, passfd, passfile)
@@ -106,7 +114,7 @@ def parse_options(args):
 
 
 def append_if_project(project_groups, group):
-    # If this group has a ospoolproject id, and it starts with "Yes-", it's a project
+    """If this group has a ospoolproject id, and it starts with "Yes-", it's a project"""
     if utils.identifier_matches(group["ID_List"], "ospoolproject", (OSPOOL_PROJECT_PREFIX_STR + "*")):
         # Add a dict of the relavent data for this project to the project_groups list
         project_groups.append(group)
@@ -116,9 +124,9 @@ def update_highest_osggid(highest_osggid, group):
     # Get the value of the osggid identifier, if this group has one
     osggid = utils.identifier_from_list(group["ID_List"], "osggid")
     # If this group has a osggid, keep a hold of the highest one we've seen so far
-    if osggid is not None:
+    try:
         return max(highest_osggid, int(osggid))
-    else:
+    except TypeError:
         return highest_osggid
 
 
@@ -128,8 +136,8 @@ def get_comanage_data():
 
     co_groups = utils.get_osg_co_groups(options.osg_co_id, options.endpoint, options.authstr)["CoGroups"]
     for group_data in co_groups:
-        try:
-            identifier_list = utils.get_co_group_identifiers(group_data["Id"], options.endpoint, options.authstr)
+        identifier_list = utils.get_co_group_identifiers(group_data["Id"], options.endpoint, options.authstr)
+        if identifier_list is not None:
             # Store this groups data in a dictionary to avoid repeated API calls
             group = {"Gid": group_data["Id"], "Name": group_data["Name"], "ID_List": identifier_list["Identifiers"]}
 
@@ -138,8 +146,6 @@ def get_comanage_data():
 
             # Update highest_osggid, if this group has an osggid and it's higher than the current highest osggid.
             highest_osggid = update_highest_osggid(highest_osggid, group)
-        except TypeError:
-            pass
     return (projects_list, highest_osggid)
 
 
@@ -169,12 +175,14 @@ def get_projects_needing_cluster_groups(project_groups):
         )
         return projects_needing_unix_groups
     except TypeError:
+        print("ERROR: TypeError raised while trying to determine which projects need UNIX cluster groups\n"
+              +f"clustered group ids: {clustered_group_ids} and project_gids: {project_gids}")
         return set()
     
 
 def get_projects_needing_provisioning(project_groups):
     # project groups provisioned in LDAP
-    ldap_group_osggids = utils.get_ldap_groups(LDAP_SERVER, LDAP_USER, options.ldap_authtok)
+    ldap_group_osggids = utils.get_ldap_groups(options.ldap_server, options.ldap_user, options.ldap_authtok)
     try:
         # All project osggids
         project_osggids = set(
@@ -190,6 +198,8 @@ def get_projects_needing_provisioning(project_groups):
         )
         return projects_to_provision
     except TypeError:
+        print("TypeError raised while trying to determine which projects need provisioning\n"
+              +f"ldap group osggids: {ldap_group_osggids} and project osggids: {project_osggids}")
         return set()
 
 
@@ -241,7 +251,7 @@ def provision_groups(project_list):
 def main(args):
     parse_options(args)
 
-    # Make all of the nessisary calls to COManage's API for the data we'll need to set up projects.
+    # Make all of the necessary calls to COManage's API for the data we'll need to set up projects.
     # Projects is a List of dicts with keys Gid, Name, and Identifiers, the project's list of identifiers.
     # Highest_current_osggid is the highest OSGGID that's currently assigned to any CO Group.
     projects, highest_current_osggid = get_comanage_data()
@@ -265,6 +275,5 @@ def main(args):
 if __name__ == "__main__":
     try:
         main(sys.argv[1:])
-    except OSError as e:
-        print(e, file=sys.stderr)
-        sys.exit(1)
+    except Exception as e:
+        sys.exit(e)

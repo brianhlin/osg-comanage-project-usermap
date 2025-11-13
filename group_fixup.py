@@ -7,7 +7,7 @@ import getopt
 import collections
 import urllib.error
 import urllib.request
-import comanage_scripts_utils as utils
+import comanage_utils as utils
 
 
 SCRIPT = os.path.basename(__file__)

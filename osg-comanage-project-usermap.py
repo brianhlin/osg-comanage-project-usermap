@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
 import os
+import re
 import sys
 import time
 import getopt
 import urllib.error
 import urllib.request
-import comanage_scripts_utils as utils
+import comanage_utils as utils
 
 
 SCRIPT = os.path.basename(__file__)
@@ -33,6 +34,7 @@ OPTIONS:
                         (default = {ENDPOINT})
   -o outfile          specify output file (default: write to stdout)
   -g filter_group     filter users by group name (eg, 'ap1-login')
+  -l localmaps        specify a comma-delimited list of local HTCondor mapfiles to merge into outfile
   -h                  display this help text
 
 PASS for USER is taken from the first of:
@@ -52,7 +54,7 @@ def usage(msg=None):
 
 class Options:
     endpoint = ENDPOINT
-    user = "co_8.project_script"
+    user = "co_7.project_script"
     osg_co_id = OSG_CO_ID
     outfile = None
     authstr = None
@@ -60,6 +62,7 @@ class Options:
     ldap_user = LDAP_USER
     ldap_authtok = None
     filtergrp = None
+    localmaps = []
 
 
 options = Options()
@@ -91,7 +94,8 @@ def get_co_group_members__pids(gid):
     #print(f"get_co_group_members__pids({gid})")
     resp_data = utils.get_co_group_members(gid,  options.endpoint, options.authstr)
     data = utils.get_datalist(resp_data, "CoGroupMembers")
-    return [ m["Person"]["Id"] for m in data ]
+    # For INF-1060: Temporary Fix until "The Great Project Provisioning" is finished
+    return [ m["Person"]["Id"] for m in data if m["Member"] == True]
 
 
 def get_co_person_osguser(pid):
@@ -127,6 +131,7 @@ def parse_options(args):
         if op == '-e': options.endpoint   = arg
         if op == '-o': options.outfile    = arg
         if op == '-g': options.filtergrp  = arg
+        if op == '-l': options.localmaps = arg.split(",")
 
     try:
         user, passwd = utils.getpw(options.user, passfd, passfile)
@@ -135,6 +140,11 @@ def parse_options(args):
     except PermissionError:
         usage("PASS required")
 
+def _deduplicate_list(items):
+    """ Deduplicate a list while maintaining order by converting it to a dictionary and then back to a list. 
+    Used to ensure a consistent ordering for output group lists, since sets are unordered.
+    """
+    return list(dict.fromkeys(items))
 
 def get_ldap_group_members_dict():
     group_data_dict = dict()
@@ -215,6 +225,32 @@ def get_osguser_groups(filter_group_name=None):
     return usernames_to_project_map
 
 
+def parse_localmap(inputfile):
+    user_groupmap = dict()
+    with open(inputfile, 'r', encoding='utf-8') as file:
+        for line in file:
+            # Split up 3 semantic columns
+            split_line = line.strip().split(maxsplit=2)
+            if split_line[0] == "*" and len(split_line) == 3:
+                line_groups = re.split(r'[ ,]+', split_line[2])
+                if split_line[1] in user_groupmap:
+                    user_groupmap[split_line[1]] = _deduplicate_list(user_groupmap[split_line[1]] + line_groups)
+                else:
+                    user_groupmap[split_line[1]] = line_groups
+    return user_groupmap
+
+
+def merge_maps(maps):
+    merged_map = dict()
+    for projectmap in maps:
+        for key in projectmap.keys():
+            if key in merged_map:
+                merged_map[key] = _deduplicate_list(merged_map[key] + projectmap[key])
+            else:
+                merged_map[key] = projectmap[key]
+    return merged_map
+
+
 def print_usermap_to_file(osguser_groups, file):
     for osguser, groups in sorted(osguser_groups.items()):
         print("* {} {}".format(osguser, ",".join(group.strip() for group in groups)), file=file)
@@ -232,12 +268,17 @@ def main(args):
     parse_options(args)
 
     osguser_groups = get_osguser_groups(options.filtergrp)
-    print_usermap(osguser_groups)
+
+    maps = [osguser_groups]
+    for localmap in options.localmaps:
+        maps.append(parse_localmap(localmap))
+    osguser_groups_merged = merge_maps(maps)
+
+    print_usermap(osguser_groups_merged)
 
 
 if __name__ == "__main__":
     try:
         main(sys.argv[1:])
-    except urllib.error.HTTPError as e:
-        print(e, file=sys.stderr)
-        sys.exit(1)
+    except Exception as e:
+        sys.exit(e)
