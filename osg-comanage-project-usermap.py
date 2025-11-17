@@ -7,11 +7,13 @@ import time
 import getopt
 import urllib.error
 import urllib.request
+import requests
 import comanage_utils as utils
 
 
 SCRIPT = os.path.basename(__file__)
 ENDPOINT = "https://registry-test.cilogon.org/registry/"
+TOPOLOGY_ENDPOINT = "https://topology.opensciencegrid.org/"
 LDAP_SERVER = "ldaps://ldap-test.cilogon.org"
 LDAP_USER = "uid=registry_user,ou=system,o=OSG,o=CO,dc=cilogon,dc=org"
 OSG_CO_ID = 8
@@ -203,26 +205,10 @@ def get_co_api_data():
 
 
 def get_osguser_groups(filter_group_name=None):
-    project_osggids_to_name = get_co_api_data()
-    ldap_groups_members = get_ldap_group_members_dict()
-    ldap_users = utils.get_ldap_active_users(options.ldap_server, options.ldap_user, options.ldap_authtok, filter_group_name)
-
-    active_project_osggids = set(ldap_groups_members.keys()).intersection(set(project_osggids_to_name.keys()))
-    project_to_user_map = {
-        osggid : ldap_groups_members[osggid]
-        for osggid in active_project_osggids
-        }
-    all_project_users = set(
-        username for osggid in project_to_user_map for username in project_to_user_map[osggid]
-        )
-    all_active_project_users = all_project_users.intersection(ldap_users)
-    usernames_to_project_map = create_user_to_projects_map(
-                                project_to_user_map,  
-                                all_active_project_users,
-                                project_osggids_to_name,
-                                )
-
-    return usernames_to_project_map
+    ldap_users = utils.get_ldap_active_users_and_groups(options.ldap_server, options.ldap_user, options.ldap_authtok, filter_group_name)
+    topology_projects = requests.get(f"{TOPOLOGY_ENDPOINT}/miscproject/json").json()
+    project_names = topology_projects.keys()
+    return {user: [p for p in groups if p in project_names] for user, groups in ldap_users.items()}
 
 
 def parse_localmap(inputfile):

@@ -205,6 +205,19 @@ def get_ldap_active_users(ldap_server, ldap_user, ldap_authtok, filter_group_nam
         ldap_active_users.add(person["attributes"]["employeeNumber"])
     return ldap_active_users
 
+def get_ldap_active_users_and_groups(ldap_server, ldap_user, ldap_authtok, filter_group_name=None):
+    """ Retrieve a dictionary of active users from LDAP, with their group memberships. """
+    ldap_active_users = {}
+    filter_str = ("(isMemberOf=CO:members:active)" if filter_group_name is None 
+                  else f"(&(isMemberOf={filter_group_name})(isMemberOf=CO:members:active))")
+    server = Server(ldap_server, get_info=ALL)
+    connection = Connection(server, ldap_user, ldap_authtok, client_strategy=SAFE_SYNC, auto_bind=True)
+    _, _, response, _ = connection.search("ou=people,o=OSG,o=CO,dc=cilogon,dc=org", filter_str, attributes=["employeeNumber", "isMemberOf"])
+    for person in response:
+        ldap_active_users[person["attributes"]["employeeNumber"]] = person["attributes"].get("isMemberOf", [])
+
+    return ldap_active_users
+
 
 def identifier_from_list(id_list, id_type):
     id_type_list = [id["Type"] for id in id_list]
