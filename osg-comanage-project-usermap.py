@@ -22,7 +22,7 @@ CACHE_LIFETIME_HOURS = 0.5
 
 
 _usage = f"""\
-usage: [PASS=...] {SCRIPT} [OPTIONS]
+usage: {SCRIPT} [OPTIONS]
 
 OPTIONS:
   -u USER[:PASS]      specify USER and optionally PASS on command line
@@ -36,7 +36,7 @@ OPTIONS:
                         (default = {ENDPOINT})
   -o outfile          specify output file (default: write to stdout)
   -g filter_group     filter users by group name (eg, 'ap1-login')
-  -l localmaps        specify a comma-delimited list of local HTCondor mapfiles to merge into outfile
+  -m localmaps        specify a comma-delimited list of local HTCondor mapfiles to merge into outfile
   -h                  display this help text
 
 PASS for USER is taken from the first of:
@@ -133,7 +133,7 @@ def parse_options(args):
         if op == '-e': options.endpoint   = arg
         if op == '-o': options.outfile    = arg
         if op == '-g': options.filtergrp  = arg
-        if op == '-l': options.localmaps = arg.split(",")
+        if op == '-m': options.localmaps = arg.split(",")
 
     try:
         user, passwd = utils.getpw(options.user, passfd, passfile)
@@ -208,7 +208,11 @@ def get_osguser_groups(filter_group_name=None):
     ldap_users = utils.get_ldap_active_users_and_groups(options.ldap_server, options.ldap_user, options.ldap_authtok, filter_group_name)
     topology_projects = requests.get(f"{TOPOLOGY_ENDPOINT}/miscproject/json").json()
     project_names = topology_projects.keys()
-    return {user: [p for p in groups if p in project_names] for user, groups in ldap_users.items()}
+    return {
+        user: [g for g in groups if g in project_names] 
+        for user, groups in ldap_users.items()
+        if any(g in project_names for g in groups)
+    }
 
 
 def parse_localmap(inputfile):
