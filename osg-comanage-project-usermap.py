@@ -37,6 +37,7 @@ OPTIONS:
   -o outfile          specify output file (default: write to stdout)
   -g filter_group     filter users by group name (eg, 'ap1-login')
   -m localmaps        specify a comma-delimited list of local HTCondor mapfiles to merge into outfile
+  -n min_users        Specify minimum number of users required to update the output file (default: 100)
   -h                  display this help text
 
 PASS for USER is taken from the first of:
@@ -64,6 +65,7 @@ class Options:
     ldap_user = LDAP_USER
     ldap_authtok = None
     filtergrp = None
+    min_users = 100 # Bail out before updating the file if we have fewer than this many users
     localmaps = []
 
 
@@ -76,41 +78,12 @@ def get_osg_co_groups__map():
     #print("get_osg_co_groups__map()")
     resp_data = utils.get_osg_co_groups(options.osg_co_id, options.endpoint, options.authstr)
     data = utils.get_datalist(resp_data, "CoGroups")
-    return { g["Id"]: g["Name"] for g in data }
-
-
-def co_group_is_project(gid):
-    #print(f"co_group_is_ospool({gid})")
-    resp_data = utils.get_co_group_identifiers(gid, options.endpoint, options.authstr)
-    data = utils.get_datalist(resp_data, "Identifiers")
-    return any( i["Type"] == "ospoolproject" for i in data )
-
-
-def get_co_group_osggid(gid):
-    resp_data = utils.get_co_group_identifiers(gid, options.endpoint, options.authstr)
-    data = utils.get_datalist(resp_data, "Identifiers")
-    return list(filter(lambda x : x["Type"] == "osggid", data))[0]["Identifier"]
-
-
-def get_co_group_members__pids(gid):
-    #print(f"get_co_group_members__pids({gid})")
-    resp_data = utils.get_co_group_members(gid,  options.endpoint, options.authstr)
-    data = utils.get_datalist(resp_data, "CoGroupMembers")
-    # For INF-1060: Temporary Fix until "The Great Project Provisioning" is finished
-    return [ m["Person"]["Id"] for m in data if m["Member"] == True]
-
-
-def get_co_person_osguser(pid):
-    #print(f"get_co_person_osguser({pid})")
-    resp_data = utils.get_co_person_identifiers(pid, options.endpoint, options.authstr)
-    data = utils.get_datalist(resp_data, "Identifiers")
-    typemap = { i["Type"]: i["Identifier"] for i in data }
-    return typemap.get("osguser")
+    return { g["Name"]: g["Id"] for g in data }
 
 
 def parse_options(args):
     try:
-        ops, args = getopt.getopt(args, 'u:c:s:l:a:d:f:g:e:o:h')
+        ops, args = getopt.getopt(args, 'u:c:s:l:a:d:f:g:e:o:h:n:m')
     except getopt.GetoptError:
         usage()
 
@@ -133,7 +106,8 @@ def parse_options(args):
         if op == '-e': options.endpoint   = arg
         if op == '-o': options.outfile    = arg
         if op == '-g': options.filtergrp  = arg
-        if op == '-m': options.localmaps = arg.split(",")
+        if op == '-m': options.localmaps  = arg.split(",")
+        if op == '-n': options.min_users  = int(arg)
 
     try:
         user, passwd = utils.getpw(options.user, passfd, passfile)
@@ -170,46 +144,15 @@ def create_user_to_projects_map(project_to_user_map, active_users, osggids_to_na
     return users_to_projects_map
 
 
-def get_groups_data_from_api():
-    groups = get_osg_co_groups__map()
-    project_osggids_to_name = dict()
-    for id,name in groups.items():
-        if co_group_is_project(id):
-            project_osggids_to_name[get_co_group_osggid(id)] = name
-    return project_osggids_to_name
-
-
-def get_co_api_data():
-    try:
-        r = open(CACHE_FILENAME, "r")
-        lines = r.readlines()
-        if float(lines[0]) >= (time.time() - (60 * 60 * CACHE_LIFETIME_HOURS)):
-            entries = lines[1:len(lines)]
-            project_osggids_to_name = dict()
-            for entry in entries:
-                osggid_name_pair = entry.split(":")
-                if len(osggid_name_pair) == 2:
-                    project_osggids_to_name[int(osggid_name_pair[0])] = osggid_name_pair[1].strip()
-            r.close()
-        else:
-            r.close()
-            raise OSError
-    except OSError:
-        with open(CACHE_FILENAME, "w") as w:
-            project_osggids_to_name = get_groups_data_from_api()
-            print(time.time(), file=w)
-            for osggid, name in project_osggids_to_name.items():
-                print(f"{osggid}:{name}", file=w)
-
-    return project_osggids_to_name
-
-
 def get_osguser_groups(filter_group_name=None):
     ldap_users = utils.get_ldap_active_users_and_groups(options.ldap_server, options.ldap_user, options.ldap_authtok, filter_group_name)
     topology_projects = requests.get(f"{TOPOLOGY_ENDPOINT}/miscproject/json").json()
     project_names = topology_projects.keys()
+    
+    # Get COManage group IDs to preserve ordering from pre-LDAP migration script behavior
+    groups_ids = get_osg_co_groups__map()
     return {
-        user: [g for g in groups if g in project_names] 
+        user: sorted([g for g in groups if g in project_names], key = lambda g: groups_ids.get(g, 0)) 
         for user, groups in ldap_users.items()
         if any(g in project_names for g in groups)
         and any(':members:active' in g for g in groups)
@@ -265,6 +208,9 @@ def main(args):
         maps.append(parse_localmap(localmap))
     osguser_groups_merged = merge_maps(maps)
 
+    # Sanity check, confirm we have generated a "sane" amount of user -> group mappings
+    if len(osguser_groups_merged) < options.min_users:
+        raise RuntimeError(f"Refusing to update output file: only {len(osguser_groups_merged)} users found")
     print_usermap(osguser_groups_merged)
 
 
