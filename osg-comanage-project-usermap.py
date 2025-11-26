@@ -3,10 +3,7 @@
 import os
 import re
 import sys
-import time
 import getopt
-import urllib.error
-import urllib.request
 import requests
 import comanage_utils as utils
 
@@ -121,28 +118,6 @@ def _deduplicate_list(items):
     Used to ensure a consistent ordering for output group lists, since sets are unordered.
     """
     return list(dict.fromkeys(items))
-
-def get_ldap_group_members_dict():
-    group_data_dict = dict()
-    for group_gid in utils.get_ldap_groups(options.ldap_server, options.ldap_user, options.ldap_authtok):
-        group_members = utils.get_ldap_group_members(group_gid, options.ldap_server, options.ldap_user, options.ldap_authtok)
-        group_data_dict[group_gid] = group_members
-
-    return group_data_dict
-
-
-def create_user_to_projects_map(project_to_user_map, active_users, osggids_to_names):
-    users_to_projects_map = dict()
-    for osggid in project_to_user_map:
-        for user in project_to_user_map[osggid]:
-            if user in active_users:
-                if user not in users_to_projects_map:
-                    users_to_projects_map[user] = [osggids_to_names[osggid]]
-                else:
-                    users_to_projects_map[user].append(osggids_to_names[osggid])
-
-    return users_to_projects_map
-
 
 def get_osguser_groups(filter_group_name=None):
     ldap_users = utils.get_ldap_active_users_and_groups(options.ldap_server, options.ldap_user, options.ldap_authtok, filter_group_name)

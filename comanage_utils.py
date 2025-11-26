@@ -6,7 +6,7 @@ import json
 import time
 import urllib.error
 import urllib.request
-from ldap3 import Server, Connection, ALL, SAFE_SYNC
+from ldap3 import Server, Connection, ALL, SAFE_SYNC, Tls
 
 #PRODUCTION VALUES
 
@@ -71,7 +71,7 @@ def mkauthstr(user, passwd):
 
 def get_ldap_authtok(ldap_authfile):
     if ldap_authfile is not None:
-        ldap_authtok = open(ldap_authfile).readline().rstrip("\n")
+        ldap_authtok = open(ldap_authfile).readline().strip()
     else:
         raise PermissionError
     return ldap_authtok
@@ -182,28 +182,6 @@ def get_ldap_groups(ldap_server, ldap_user, ldap_authtok):
         ldap_group_osggids.add(group["attributes"]["gidNumber"])
     return ldap_group_osggids
 
-
-def get_ldap_group_members(ldap_gid, ldap_server, ldap_user, ldap_authtok):
-    ldap_group_members = set()
-    server = Server(ldap_server, get_info=ALL)
-    connection = Connection(server, ldap_user, ldap_authtok, client_strategy=SAFE_SYNC, auto_bind=True)
-    _, _, response, _ = connection.search("ou=groups,o=OSG,o=CO,dc=cilogon,dc=org", f"(&(gidNumber={ldap_gid})(cn=*))", attributes=["hasMember"])
-    for group in response:
-        ldap_group_members.update(group["attributes"]["hasMember"])
-    return ldap_group_members
-
-
-def get_ldap_active_users(ldap_server, ldap_user, ldap_authtok, filter_group_name=None):
-    ldap_active_users = set()
-    filter_str = ("(isMemberOf=CO:members:active)" if filter_group_name is None 
-                  else f"(&(isMemberOf={filter_group_name})(isMemberOf=CO:members:active))")
-    server = Server(ldap_server, get_info=ALL)
-    connection = Connection(server, ldap_user, ldap_authtok, client_strategy=SAFE_SYNC, auto_bind=True)
-    _, _, response, _ = connection.search("ou=people,o=OSG,o=CO,dc=cilogon,dc=org", filter_str, attributes=["employeeNumber"])
-    for person in response:
-        # the "employeeNumber" is the person's name in the first.last format
-        ldap_active_users.add(person["attributes"]["employeeNumber"])
-    return ldap_active_users
 
 def get_ldap_active_users_and_groups(ldap_server, ldap_user, ldap_authtok, filter_group_name=None):
     """ Retrieve a dictionary of active users from LDAP, with their group memberships. """
