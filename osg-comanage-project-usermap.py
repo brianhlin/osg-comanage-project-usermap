@@ -130,7 +130,6 @@ def get_osguser_groups(filter_group_name=None):
         user: sorted([g for g in groups if g in project_names], key = lambda g: groups_ids.get(g, 0)) 
         for user, groups in ldap_users.items()
         if any(g in project_names for g in groups)
-        and any(':members:active' in g for g in groups)
     }
 
 
