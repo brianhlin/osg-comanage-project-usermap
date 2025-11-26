@@ -185,7 +185,7 @@ def get_ldap_groups(ldap_server, ldap_user, ldap_authtok):
 
 def get_ldap_active_users_and_groups(ldap_server, ldap_user, ldap_authtok, filter_group_name=None):
     """ Retrieve a dictionary of active users from LDAP, with their group memberships. """
-    ldap_active_users = {}
+    ldap_active_users = dict()
     filter_str = ("(isMemberOf=CO:members:active)" if filter_group_name is None 
                   else f"(&(isMemberOf={filter_group_name})(isMemberOf=CO:members:active))")
     server = Server(ldap_server, get_info=ALL)
