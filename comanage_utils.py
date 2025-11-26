@@ -7,6 +7,7 @@ import time
 import urllib.error
 import urllib.request
 from ldap3 import Server, Connection, ALL, SAFE_SYNC, Tls
+from dataclasses import dataclass
 
 #PRODUCTION VALUES
 
@@ -173,11 +174,23 @@ def get_datalist(data, listname):
     return data[listname] if data else []
 
 
+class LDAPSearch:
+    """ Wrapper class for LDAP searches. """
+    server: Server = None
+    connection: Connection = None
+
+    def __init__(self, ldap_server, ldap_user, ldap_authtok):
+        self.server = Server(ldap_server, get_info=ALL)
+        self.connection = Connection(self.server, ldap_user, ldap_authtok, client_strategy=SAFE_SYNC, auto_bind=True)
+
+    def search(self, ou, filter_str, attrs):
+        _, _, response, _ = self.connection.search(f"ou={ou},o=OSG,o=CO,dc=cilogon,dc=org", filter_str, attributes=attrs)
+        return response
+
 def get_ldap_groups(ldap_server, ldap_user, ldap_authtok):
     ldap_group_osggids = set()
-    server = Server(ldap_server, get_info=ALL)
-    connection = Connection(server, ldap_user, ldap_authtok, client_strategy=SAFE_SYNC, auto_bind=True)
-    _, _, response, _ = connection.search("ou=groups,o=OSG,o=CO,dc=cilogon,dc=org", "(cn=*)", attributes=["gidNumber"])
+    searcher = LDAPSearch(ldap_server, ldap_user, ldap_authtok)
+    response = searcher.search("groups", "(cn=*)", ["gidNumber"])
     for group in response:
         ldap_group_osggids.add(group["attributes"]["gidNumber"])
     return ldap_group_osggids
@@ -188,9 +201,10 @@ def get_ldap_active_users_and_groups(ldap_server, ldap_user, ldap_authtok, filte
     ldap_active_users = dict()
     filter_str = ("(isMemberOf=CO:members:active)" if filter_group_name is None 
                   else f"(&(isMemberOf={filter_group_name})(isMemberOf=CO:members:active))")
-    server = Server(ldap_server, get_info=ALL)
-    connection = Connection(server, ldap_user, ldap_authtok, client_strategy=SAFE_SYNC, auto_bind=True)
-    _, _, response, _ = connection.search("ou=people,o=OSG,o=CO,dc=cilogon,dc=org", filter_str, attributes=["employeeNumber", "isMemberOf"])
+
+    searcher = LDAPSearch(ldap_server, ldap_user, ldap_authtok)
+    response = searcher.search("people", filter_str, ["employeeNumber", "isMemberOf"])
+
     for person in response:
         ldap_active_users[person["attributes"]["employeeNumber"]] = person["attributes"].get("isMemberOf", [])
 
