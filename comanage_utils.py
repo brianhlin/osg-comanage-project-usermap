@@ -17,6 +17,7 @@ PRODUCTION_LDAP_USER = "uid=readonly_user,ou=system,o=OSG,o=CO,dc=cilogon,dc=org
 PRODUCTION_OSG_CO_ID = 7
 PRODUCTION_UNIX_CLUSTER_ID = 1
 PRODUCTION_LDAP_TARGET_ID = 6
+LDAP_BASE_DN = "o=OSG,o=CO,dc=cilogon,dc=org"
 
 #TEST VALUES
 
@@ -184,7 +185,7 @@ class LDAPSearch:
         self.connection = Connection(self.server, ldap_user, ldap_authtok, client_strategy=SAFE_SYNC, auto_bind=True)
 
     def search(self, ou, filter_str, attrs):
-        _, _, response, _ = self.connection.search(f"ou={ou},o=OSG,o=CO,dc=cilogon,dc=org", filter_str, attributes=attrs)
+        _, _, response, _ = self.connection.search(f"ou={ou},{LDAP_BASE_DN}", filter_str, attributes=attrs)
         return response
 
 def get_ldap_groups(ldap_server, ldap_user, ldap_authtok):
