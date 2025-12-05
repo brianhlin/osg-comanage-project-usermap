@@ -80,7 +80,7 @@ def get_osg_co_groups__map():
 
 def parse_options(args):
     try:
-        ops, args = getopt.getopt(args, 'u:c:s:l:a:d:f:g:e:o:h:n:m')
+        ops, args = getopt.getopt(args, 'u:c:s:l:a:d:f:g:e:o:h:n:m:')
     except getopt.GetoptError:
         usage()
 
